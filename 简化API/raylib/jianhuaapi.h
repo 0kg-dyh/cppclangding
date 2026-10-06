@@ -2,6 +2,8 @@
 #include <raylib.h>
 #include<map>
 #include<string>
+#include <unordered_map>
+#include <cstdint>
 #define KEY_SHANG KEY_UP
 #define KEY_XIA KEY_DOWN
 #define KEY_ZUO KEY_LEFT
@@ -68,7 +70,7 @@ namespace Guaytp {
 
         if (flip) {
             src = { (float)tex.width, 0, -(float)tex.width, (float)tex.height };
-            dst = { x + w, y, w, h };
+            dst = { x, y, w, h };   // ← 改成 x，不再 x + w
         } else {
             src = { 0, 0, (float)tex.width, (float)tex.height };
             dst = { x, y, w, h };
@@ -187,7 +189,29 @@ public:
         }
         cache.clear();
     }
+     // 铺满背景：图片路径, 摄像机
+    void Puyc(const char* path, float x, float y) {
+    // 静态缓存
+    static std::map<std::string, Texture2D> cache;
 
+    std::string key(path);
+    auto it = cache.find(key);
+    if (it == cache.end()) {
+        Texture2D tex = LoadTexture(path);
+        if (tex.id == 0) {
+            cache[key] = Texture2D{ 0, 0, 0, 0, 0 };
+            return;
+        }
+        cache[key] = tex;
+        it = cache.find(key);
+    }
+
+    Texture2D tex = it->second;
+    if (tex.id == 0) return;
+
+    // 按原始尺寸画一次
+    DrawTexture(tex, (int)x, (int)y, WHITE);
+}
     // 贴瓷砖背景：图片路径, 摄像机
     static void Tcbj(const char* path, Camera2D& camera) {
         auto& self = Get();
@@ -231,5 +255,89 @@ public:
                 DrawTexture(tex, x * tileSize, y * tileSize, WHITE);
             }
         }
+    }
+};
+class GuayUI {
+private:
+    static std::unordered_map<const void*, int>& GetStack() {
+        static std::unordered_map<const void*, int> stack;
+        return stack;
+    }
+
+    static double& LastTime() {
+        static double t = -1.0;
+        return t;
+    }
+
+    static void DrawBar(float progress, float w, float h, float x, float y, Color color) {
+        DrawRectangle((int)x, (int)y, (int)w, (int)h, LIGHTGRAY);
+        DrawRectangle((int)x, (int)y, (int)(w * progress), (int)h, color);
+        DrawRectangleLines((int)x, (int)y, (int)w, (int)h, DARKGRAY);
+    }
+
+public:
+    // 进度条：百分比, 宽, 高, x, y, 是否用于角色, 层叠顺序, 文字, 颜色
+    static void Jdt(float percent, float w, float h,
+                    float x, float y,
+                    bool forCharacter = false,
+                    int layer = 0,
+                    const char* text = "",
+                    Color color = GREEN) {
+        double currentTime = GetTime();
+        if (currentTime != LastTime()) {
+            GetStack().clear();
+            LastTime() = currentTime;
+        }
+
+        if (percent < 0.0f) percent = 0.0f;
+        if (percent > 100.0f) percent = 100.0f;
+        float progress = percent / 100.0f;
+
+        float actualX, actualY;
+        if (forCharacter) {
+            const void* key = (const void*)(intptr_t)(x * 10000 + y);
+            auto& stack = GetStack();
+            int& count = stack[key];
+
+            int actualLayer = (layer > 0) ? layer : count;
+            float offsetY = -(h + 2) * (actualLayer + 1);
+
+            actualX = x + 50 - w / 2;
+            actualY = y + offsetY;
+
+            count++;
+        } else {
+            actualX = x;
+            actualY = y;
+        }
+
+        // 画进度条
+        DrawBar(progress, w, h, actualX, actualY, color);
+
+        // 如果有文字，居中画
+        if (text[0] != '\0') {
+            int fontSize = (int)h - 2;
+            if (fontSize < 8) fontSize = 8;
+            int textW = MeasureText(text, fontSize);
+            DrawText(text,
+                     (int)(actualX + (w - textW) / 2),
+                     (int)(actualY + (h - fontSize) / 2),
+                     fontSize, BLACK);
+        }
+    }
+};
+class GuayMouse {
+public:
+    // 鼠标是否碰到角色（世界坐标）
+    // 参数：角色x, y, 宽, 高, 摄像机
+    static bool OnChar(float x, float y, float w, float h, Camera2D& camera) {
+        Vector2 world = GetScreenToWorld2D(GetMousePosition(), camera);
+        return CheckCollisionPointRec(world, { x, y, w, h });
+    }
+
+    // 鼠标是否点击了角色
+    static bool ClickChar(float x, float y, float w, float h, Camera2D& camera) {
+        return OnChar(x, y, w, h, camera)
+            && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
     }
 };
